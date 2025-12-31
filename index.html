@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Offline GPS App</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="manifest" href="manifest.json">
+</head>
+
+<body style="font-family: Arial; padding:20px">
+
+<h2>📍 Offline GPS App</h2>
+<p id="status">Waiting for GPS…</p>
+
+<script>
+navigator.geolocation.getCurrentPosition(
+  function(pos) {
+    document.getElementById("status").innerHTML =
+      "Latitude: " + pos.coords.latitude +
+      "<br>Longitude: " + pos.coords.longitude +
+      "<br>Accuracy: " + pos.coords.accuracy + " meters";
+  },
+  function(err) {
+    document.getElementById("status").innerHTML =
+      "Error: " + err.message;
+  },
+  { enableHighAccuracy: true }
+);
+</script>
+
+<script>
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.register("service-worker.js");
+}
+</script>
+
+</body>
+</html>
