@@ -4,27 +4,58 @@
   <title>Offline GPS App</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link rel="manifest" href="manifest.json">
+
+  <!-- Leaflet Map -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css">
+  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+
+  <style>
+    #map { height: 300px; margin-top: 10px; }
+  </style>
 </head>
 
-<body style="font-family: Arial; padding:20px">
+<body style="font-family: Arial; padding:15px">
 
-<h2>📍 Offline GPS App</h2>
+<h3>📍 Offline GPS App</h3>
 <p id="status">Waiting for GPS…</p>
 
+<div id="map"></div>
+
 <script>
-navigator.geolocation.getCurrentPosition(
+navigator.geolocation.watchPosition(
   function(pos) {
+    const lat = pos.coords.latitude;
+    const lon = pos.coords.longitude;
+    const acc = pos.coords.accuracy;
+    const speed = pos.coords.speed;
+
     document.getElementById("status").innerHTML =
-      "Latitude: " + pos.coords.latitude +
-      "<br>Longitude: " + pos.coords.longitude +
-      "<br>Accuracy: " + pos.coords.accuracy + " meters";
+      `Lat: ${lat}<br>Lon: ${lon}<br>
+       Accuracy: ${acc} m<br>
+       Speed: ${speed ? (speed*3.6).toFixed(1) + " km/h" : "0 km/h"}`;
+
+    if (!window.map) {
+      window.map = L.map('map').setView([lat, lon], 16);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+      window.marker = L.marker([lat, lon]).addTo(map);
+    } else {
+      marker.setLatLng([lat, lon]);
+      map.setView([lat, lon]);
+    }
+
+    saveLocation(lat, lon);
   },
-  function(err) {
-    document.getElementById("status").innerHTML =
-      "Error: " + err.message;
-  },
+  err => alert(err.message),
   { enableHighAccuracy: true }
 );
+</script>
+
+<script>
+function saveLocation(lat, lon) {
+  let data = JSON.parse(localStorage.getItem("history") || "[]");
+  data.push({lat, lon, time: new Date().toLocaleString()});
+  localStorage.setItem("history", JSON.stringify(data));
+}
 </script>
 
 <script>
