@@ -5,23 +5,32 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link rel="manifest" href="manifest.json">
 
-  <!-- Leaflet Map -->
+  <!-- Leaflet Map (loads once, cached later) -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css">
   <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
 
   <style>
+    body { font-family: Arial; padding: 12px; }
     #map { height: 300px; margin-top: 10px; }
+    button { margin-top: 10px; padding: 8px; }
   </style>
 </head>
 
-<body style="font-family: Arial; padding:15px">
+<body>
 
 <h3>📍 Offline GPS App</h3>
+
 <p id="status">Waiting for GPS…</p>
+
+<button onclick="showHistory()">📜 Show Location History</button>
+<div id="history"></div>
 
 <div id="map"></div>
 
 <script>
+let map, marker;
+
+/* WATCH GPS (LIVE UPDATES, NO INTERNET) */
 navigator.geolocation.watchPosition(
   function(pos) {
     const lat = pos.coords.latitude;
@@ -30,14 +39,17 @@ navigator.geolocation.watchPosition(
     const speed = pos.coords.speed;
 
     document.getElementById("status").innerHTML =
-      `Lat: ${lat}<br>Lon: ${lon}<br>
-       Accuracy: ${acc} m<br>
-       Speed: ${speed ? (speed*3.6).toFixed(1) + " km/h" : "0 km/h"}`;
+      `Latitude: ${lat}<br>
+       Longitude: ${lon}<br>
+       Accuracy: ${acc} meters<br>
+       Speed: ${speed ? (speed * 3.6).toFixed(1) + " km/h" : "0 km/h"}`;
 
-    if (!window.map) {
-      window.map = L.map('map').setView([lat, lon], 16);
-      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
-      window.marker = L.marker([lat, lon]).addTo(map);
+    if (!map) {
+      map = L.map("map").setView([lat, lon], 16);
+      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        maxZoom: 19
+      }).addTo(map);
+      marker = L.marker([lat, lon]).addTo(map);
     } else {
       marker.setLatLng([lat, lon]);
       map.setView([lat, lon]);
@@ -45,19 +57,37 @@ navigator.geolocation.watchPosition(
 
     saveLocation(lat, lon);
   },
-  err => alert(err.message),
+  function(err) {
+    document.getElementById("status").innerHTML =
+      "GPS Error: " + err.message;
+  },
   { enableHighAccuracy: true }
 );
-</script>
 
-<script>
+/* SAVE LOCATION LOCALLY (OFFLINE STORAGE) */
 function saveLocation(lat, lon) {
-  let data = JSON.parse(localStorage.getItem("history") || "[]");
-  data.push({lat, lon, time: new Date().toLocaleString()});
-  localStorage.setItem("history", JSON.stringify(data));
+  let history = JSON.parse(localStorage.getItem("history") || "[]");
+  history.push({
+    lat: lat,
+    lon: lon,
+    time: new Date().toLocaleString()
+  });
+  localStorage.setItem("history", JSON.stringify(history));
+}
+
+/* SHOW LAST 10 LOCATIONS */
+function showHistory() {
+  let history = JSON.parse(localStorage.getItem("history") || "[]");
+  let html = "<ul>";
+  history.slice(-10).reverse().forEach(h => {
+    html += `<li>${h.time}<br>${h.lat}, ${h.lon}</li>`;
+  });
+  html += "</ul>";
+  document.getElementById("history").innerHTML = html;
 }
 </script>
 
+<!-- REGISTER SERVICE WORKER -->
 <script>
 if ("serviceWorker" in navigator) {
   navigator.serviceWorker.register("service-worker.js");
