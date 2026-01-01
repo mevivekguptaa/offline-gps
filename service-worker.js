@@ -1,6 +1,6 @@
 self.addEventListener("install", event => {
   event.waitUntil(
-    caches.open("offline-gps-v2").then(cache => {
+    caches.open("offline-gps-final").then(cache => {
       return cache.addAll([
         "./",
         "./index.html",
@@ -17,7 +17,7 @@ self.addEventListener("fetch", event => {
       return (
         response ||
         fetch(event.request).then(fetchRes => {
-          return caches.open("offline-gps-v2").then(cache => {
+          return caches.open("offline-gps-final").then(cache => {
             cache.put(event.request, fetchRes.clone());
             return fetchRes;
           });
