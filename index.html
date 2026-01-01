@@ -1,93 +1,169 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Offline GPS App</title>
+  <title>Offline GPS Tracker</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link rel="manifest" href="manifest.json">
 
-  <!-- Leaflet Map (loads once, cached later) -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css">
   <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
 
   <style>
-    body { font-family: Arial; padding: 12px; }
+    body { font-family: Arial; padding: 10px; }
     #map { height: 300px; margin-top: 10px; }
-    button { margin-top: 10px; padding: 8px; }
+    button { padding: 8px; margin: 5px 0; }
   </style>
 </head>
 
 <body>
 
-<h3>📍 Offline GPS App</h3>
+<h3>📍 Offline GPS Tracker</h3>
 
 <p id="status">Waiting for GPS…</p>
 
-<button onclick="showHistory()">📜 Show Location History</button>
-<div id="history"></div>
+<button onclick="showToday()">📅 Show Today’s Places</button>
+<div id="summary"></div>
 
 <div id="map"></div>
 
 <script>
-let map, marker;
+let map, marker, route;
+let routePoints = [];
+let lastStay = null;
 
-/* WATCH GPS (LIVE UPDATES, NO INTERNET) */
 navigator.geolocation.watchPosition(
-  function(pos) {
+  pos => {
     const lat = pos.coords.latitude;
     const lon = pos.coords.longitude;
     const acc = pos.coords.accuracy;
-    const speed = pos.coords.speed;
+    const speed = pos.coords.speed || 0;
+    const now = new Date();
 
     document.getElementById("status").innerHTML =
-      `Latitude: ${lat}<br>
-       Longitude: ${lon}<br>
-       Accuracy: ${acc} meters<br>
-       Speed: ${speed ? (speed * 3.6).toFixed(1) + " km/h" : "0 km/h"}`;
+      `Lat: ${lat}<br>
+       Lon: ${lon}<br>
+       Accuracy: ${acc} m<br>
+       Speed: ${(speed * 3.6).toFixed(1)} km/h`;
+
+    routePoints.push([lat, lon]);
 
     if (!map) {
-      map = L.map("map").setView([lat, lon], 16);
-      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-        maxZoom: 19
-      }).addTo(map);
+      map = L.map("map").setView([lat, lon], 17);
+      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png").addTo(map);
       marker = L.marker([lat, lon]).addTo(map);
+      route = L.polyline(routePoints, { color: "blue" }).addTo(map);
     } else {
       marker.setLatLng([lat, lon]);
-      map.setView([lat, lon]);
+      route.setLatLngs(routePoints);
+      map.panTo([lat, lon]);
     }
 
-    saveLocation(lat, lon);
+    handleStay(lat, lon, now);
   },
-  function(err) {
-    document.getElementById("status").innerHTML =
-      "GPS Error: " + err.message;
-  },
+  err => alert(err.message),
   { enableHighAccuracy: true }
 );
 
-/* SAVE LOCATION LOCALLY (OFFLINE STORAGE) */
-function saveLocation(lat, lon) {
-  let history = JSON.parse(localStorage.getItem("history") || "[]");
-  history.push({
-    lat: lat,
-    lon: lon,
-    time: new Date().toLocaleString()
-  });
-  localStorage.setItem("history", JSON.stringify(history));
+/* ---------------- STAY DETECTION ---------------- */
+
+function handleStay(lat, lon, time) {
+  if (!lastStay) {
+    lastStay = { lat, lon, start: time, fetched: false };
+    return;
+  }
+
+  const d = distance(lastStay.lat, lastStay.lon, lat, lon);
+
+  if (d < 50) {
+    const mins = (time - lastStay.start) / 60000;
+
+    if (mins >= 30 && !lastStay.fetched) {
+      fetchPlaceName(lastStay.lat, lastStay.lon, place => {
+        saveStay(lastStay.start, time, lastStay.lat, lastStay.lon, place);
+        lastStay.fetched = true;
+      });
+    }
+  } else {
+    lastStay = { lat, lon, start: time, fetched: false };
+  }
 }
 
-/* SHOW LAST 10 LOCATIONS */
-function showHistory() {
-  let history = JSON.parse(localStorage.getItem("history") || "[]");
-  let html = "<ul>";
-  history.slice(-10).reverse().forEach(h => {
-    html += `<li>${h.time}<br>${h.lat}, ${h.lon}</li>`;
+/* ---------------- SAVE STAY (OFFLINE) ---------------- */
+
+function saveStay(start, end, lat, lon, place) {
+  const day = start.toISOString().split("T")[0];
+  let data = JSON.parse(localStorage.getItem("stays") || "{}");
+  if (!data[day]) data[day] = [];
+
+  data[day].push({
+    from: start.toISOString(),
+    to: end.toISOString(),
+    lat,
+    lon,
+    place
+  });
+
+  localStorage.setItem("stays", JSON.stringify(data));
+}
+
+/* ---------------- SHOW DAY SUMMARY ---------------- */
+
+function showToday() {
+  const today = new Date().toISOString().split("T")[0];
+  let data = JSON.parse(localStorage.getItem("stays") || "{}");
+  let list = data[today] || [];
+
+  if (list.length === 0) {
+    document.getElementById("summary").innerHTML = "No stays recorded yet.";
+    return;
+  }
+
+  let html = "<h4>📍 Places Visited Today</h4><ul>";
+  list.forEach(s => {
+    html += `<li>
+      ${new Date(s.from).toLocaleTimeString()} – 
+      ${new Date(s.to).toLocaleTimeString()}<br>
+      ${s.place}
+    </li>`;
   });
   html += "</ul>";
-  document.getElementById("history").innerHTML = html;
+
+  document.getElementById("summary").innerHTML = html;
+}
+
+/* ---------------- DISTANCE (METERS) ---------------- */
+
+function distance(lat1, lon1, lat2, lon2) {
+  const R = 6371e3;
+  const φ1 = lat1 * Math.PI / 180;
+  const φ2 = lat2 * Math.PI / 180;
+  const Δφ = (lat2 - lat1) * Math.PI / 180;
+  const Δλ = (lon2 - lon1) * Math.PI / 180;
+
+  const a =
+    Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
+    Math.cos(φ1) * Math.cos(φ2) *
+    Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+/* ---------------- PLACE NAME (FREE API) ---------------- */
+
+async function fetchPlaceName(lat, lon, cb) {
+  try {
+    const res = await fetch(
+      `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}`,
+      { headers: { "User-Agent": "OfflineGPSApp" } }
+    );
+    const data = await res.json();
+    cb(data.display_name || "Unknown place");
+  } catch {
+    cb("Place name not fetched (offline)");
+  }
 }
 </script>
 
-<!-- REGISTER SERVICE WORKER -->
 <script>
 if ("serviceWorker" in navigator) {
   navigator.serviceWorker.register("service-worker.js");
