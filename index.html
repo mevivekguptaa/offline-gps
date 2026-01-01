@@ -10,8 +10,8 @@
 
   <style>
     body { font-family: Arial; padding: 10px; }
-    #map { height: 300px; margin-top: 10px; }
-    button { padding: 8px; margin: 5px 0; }
+    #map { height: 320px; margin-top: 10px; }
+    button { padding: 8px; margin: 6px 0; }
   </style>
 </head>
 
@@ -27,10 +27,20 @@
 <div id="map"></div>
 
 <script>
-let map, marker, route;
-let routePoints = [];
+/* ---------------- DATE KEY ---------------- */
+let todayKey = new Date().toISOString().split("T")[0];
+
+/* ---------------- ROUTE STORAGE ---------------- */
+let routePoints =
+  JSON.parse(localStorage.getItem("route_" + todayKey)) || [];
+
+/* ---------------- MAP OBJECTS ---------------- */
+let map, marker, routeLine;
+
+/* ---------------- STAY TRACK ---------------- */
 let lastStay = null;
 
+/* ---------------- GPS WATCH ---------------- */
 navigator.geolocation.watchPosition(
   pos => {
     const lat = pos.coords.latitude;
@@ -40,21 +50,34 @@ navigator.geolocation.watchPosition(
     const now = new Date();
 
     document.getElementById("status").innerHTML =
-      `Lat: ${lat}<br>
-       Lon: ${lon}<br>
-       Accuracy: ${acc} m<br>
+      `Latitude: ${lat}<br>
+       Longitude: ${lon}<br>
+       Accuracy: ${acc.toFixed(1)} m<br>
        Speed: ${(speed * 3.6).toFixed(1)} km/h`;
 
+    /* ---- SAVE ROUTE POINT ---- */
     routePoints.push([lat, lon]);
+    localStorage.setItem(
+      "route_" + todayKey,
+      JSON.stringify(routePoints)
+    );
 
+    /* ---- MAP INIT OR UPDATE ---- */
     if (!map) {
       map = L.map("map").setView([lat, lon], 17);
-      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png").addTo(map);
+      L.tileLayer(
+        "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+        { maxZoom: 19 }
+      ).addTo(map);
+
       marker = L.marker([lat, lon]).addTo(map);
-      route = L.polyline(routePoints, { color: "blue" }).addTo(map);
+      routeLine = L.polyline(routePoints, {
+        color: "blue",
+        weight: 4
+      }).addTo(map);
     } else {
       marker.setLatLng([lat, lon]);
-      route.setLatLngs(routePoints);
+      routeLine.setLatLngs(routePoints);
       map.panTo([lat, lon]);
     }
 
@@ -65,21 +88,31 @@ navigator.geolocation.watchPosition(
 );
 
 /* ---------------- STAY DETECTION ---------------- */
-
 function handleStay(lat, lon, time) {
   if (!lastStay) {
     lastStay = { lat, lon, start: time, fetched: false };
     return;
   }
 
-  const d = distance(lastStay.lat, lastStay.lon, lat, lon);
+  const d = distance(
+    lastStay.lat,
+    lastStay.lon,
+    lat,
+    lon
+  );
 
   if (d < 50) {
     const mins = (time - lastStay.start) / 60000;
 
     if (mins >= 30 && !lastStay.fetched) {
       fetchPlaceName(lastStay.lat, lastStay.lon, place => {
-        saveStay(lastStay.start, time, lastStay.lat, lastStay.lon, place);
+        saveStay(
+          lastStay.start,
+          time,
+          lastStay.lat,
+          lastStay.lon,
+          place
+        );
         lastStay.fetched = true;
       });
     }
@@ -88,14 +121,12 @@ function handleStay(lat, lon, time) {
   }
 }
 
-/* ---------------- SAVE STAY (OFFLINE) ---------------- */
-
+/* ---------------- SAVE STAY ---------------- */
 function saveStay(start, end, lat, lon, place) {
-  const day = start.toISOString().split("T")[0];
   let data = JSON.parse(localStorage.getItem("stays") || "{}");
-  if (!data[day]) data[day] = [];
+  if (!data[todayKey]) data[todayKey] = [];
 
-  data[day].push({
+  data[todayKey].push({
     from: start.toISOString(),
     to: end.toISOString(),
     lat,
@@ -107,21 +138,20 @@ function saveStay(start, end, lat, lon, place) {
 }
 
 /* ---------------- SHOW DAY SUMMARY ---------------- */
-
 function showToday() {
-  const today = new Date().toISOString().split("T")[0];
   let data = JSON.parse(localStorage.getItem("stays") || "{}");
-  let list = data[today] || [];
+  let list = data[todayKey] || [];
 
   if (list.length === 0) {
-    document.getElementById("summary").innerHTML = "No stays recorded yet.";
+    document.getElementById("summary").innerHTML =
+      "No places recorded yet.";
     return;
   }
 
   let html = "<h4>📍 Places Visited Today</h4><ul>";
   list.forEach(s => {
     html += `<li>
-      ${new Date(s.from).toLocaleTimeString()} – 
+      ${new Date(s.from).toLocaleTimeString()} –
       ${new Date(s.to).toLocaleTimeString()}<br>
       ${s.place}
     </li>`;
@@ -131,8 +161,7 @@ function showToday() {
   document.getElementById("summary").innerHTML = html;
 }
 
-/* ---------------- DISTANCE (METERS) ---------------- */
-
+/* ---------------- DISTANCE CALC ---------------- */
 function distance(lat1, lon1, lat2, lon2) {
   const R = 6371e3;
   const φ1 = lat1 * Math.PI / 180;
@@ -141,15 +170,14 @@ function distance(lat1, lon1, lat2, lon2) {
   const Δλ = (lon2 - lon1) * Math.PI / 180;
 
   const a =
-    Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
+    Math.sin(Δφ / 2) ** 2 +
     Math.cos(φ1) * Math.cos(φ2) *
-    Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+    Math.sin(Δλ / 2) ** 2;
 
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-/* ---------------- PLACE NAME (FREE API) ---------------- */
-
+/* ---------------- PLACE NAME (FREE) ---------------- */
 async function fetchPlaceName(lat, lon, cb) {
   try {
     const res = await fetch(
@@ -159,7 +187,7 @@ async function fetchPlaceName(lat, lon, cb) {
     const data = await res.json();
     cb(data.display_name || "Unknown place");
   } catch {
-    cb("Place name not fetched (offline)");
+    cb("Place name not fetched");
   }
 }
 </script>
